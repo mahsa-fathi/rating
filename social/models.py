@@ -5,39 +5,32 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 
 
 class Post(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    author = models.ForeignKey(User, on_delete=models.CASCADE)
     title = models.CharField(max_length=255)
     content = models.TextField()
-    rate = models.DecimalField(max_digits=2, decimal_places=2)
-    number_of_rates = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.pk}: {self.title} - {self.user.id}"
+        return f"{self.pk}: {self.title} - {self.author.id}"
 
-    def add_post_rate(self, rate):
-        with transaction.atomic():
-            post = Post.objects.select_for_update().get(pk=self.pk)
-            rate_volume = post.rate * post.number_of_rates
-            post.number_of_rates = post.number_of_rates + 1
-            post.rate = (rate_volume + rate) / post.number_of_rates
-            post.save(update_fields=['rate', 'number_of_rates', 'updated'])
+    @property
+    def rate(self):
+        volume = 0
+        number_of_rates = 0
+        for user_rating in self.userrating_set.all():
+            volume += user_rating.rate
+            number_of_rates += 1
+        if number_of_rates == 0:
+            return None
+        return volume / number_of_rates
 
-    def update_post_rate(self, old_rate, new_rate):
-        with transaction.atomic():
-            post = Post.objects.select_for_update().get(pk=self.pk)
-            rate_volume = post.rate * post.number_of_rates
-            post.rate = (rate_volume + new_rate - old_rate) / post.number_of_rates
-            post.save(update_fields=['rate', 'updated'])
-
-    def delete_post_rate(self, rate):
-        with transaction.atomic():
-            post = Post.objects.select_for_update().get(pk=self.pk)
-            rate_volume = post.rate * post.number_of_rates
-            post.number_of_rates = post.number_of_rates - 1
-            post.rate = (rate_volume - rate) / post.number_of_rates
-            post.save(update_fields=['rate', 'number_of_rates', 'updated'])
+    @property
+    def number_of_rates(self):
+        number_of_rates = 0
+        for _ in self.userrating_set.all():
+            number_of_rates += 1
+        return number_of_rates
 
 
 class UserRating(models.Model):
@@ -47,18 +40,11 @@ class UserRating(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def save(
-        self, force_insert=False, force_update=False, using=None, update_fields=None
-    ):
-        if not self.pk:
-            super().save()
-            self.post.add_post_rate(self.rate)
-        else:
-            old_rate = self.rate
-            super().save()
-            new_rate = self.rate
-            self.post.update_post_rate(old_rate, new_rate)
+    class Meta:
+        unique_together = (
+            ('user', 'post')
+        )
 
-    def delete(self, using=None, keep_parents=False):
-        self.post.delete_post_rate(self.rate)
-        super().delete()
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
