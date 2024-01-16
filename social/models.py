@@ -16,20 +16,14 @@ class Post(models.Model):
 
     @property
     def rate(self):
-        volume = 0
-        number_of_rates = 0
-        for user_rating in self.userrating_set.all():
-            volume += user_rating.rate
-            number_of_rates += 1
-        if number_of_rates == 0:
-            return None
-        return volume / number_of_rates
+        sums = self.userrating_set.aggregate(average=models.Avg('rate'))
+        rate = sums['average']
+        return rate
 
     @property
     def number_of_rates(self):
-        number_of_rates = 0
-        for _ in self.userrating_set.all():
-            number_of_rates += 1
+        sums = self.userrating_set.aggregate(count=models.Count('rate'))
+        number_of_rates = sums['count'] or 0
         return number_of_rates
 
 
